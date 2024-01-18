@@ -22,10 +22,7 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//"C:/Users/th6re8e/OneDrive - 계명대학교/GoServer/node/templates/index.html"
-	//"C:/Users/th6re/OneDrive - 계명대학교/GoServer/node/templates/index.html"
-
-	tmpl, err := template.ParseFiles("C:/Users/th6re/OneDrive - 계명대학교/GoServer/node/templates/index.html")
+	tmpl, err := template.ParseFiles("./templates/index.html")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

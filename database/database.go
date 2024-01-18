@@ -13,22 +13,18 @@ type File struct {
 	ID         int       `json:"id"`
 	Name       string    `json:"name"`
 	Path       string    `json:"path"`
+	Size       int       `json:"size"`
 	UploadDate time.Time `json:"uploaddate"`
 }
 
 var DB *sql.DB
-var dbUser string = "root@tcp(localhost:3306)/"
-var DbName string
 
-func SetDB(httpPort string) {
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbUser := os.Getenv("DB_USER")
-	dbPassword := os.Getenv("DB_PASSWORD")
-	dbName := os.Getenv("DB_NAME")
+func SetDB() {
+	mysqlHost := os.Getenv("MYSQL_HOST")
+	mysqlPort := os.Getenv("MYSQL_PORT")
 
 	var err error
-	DB, err = sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", dbUser, dbPassword, dbHost, dbPort, dbName))
+	DB, err = sql.Open("mysql", "root:rootpass@tcp("+mysqlHost+":"+mysqlPort+")/mydatabase?parseTime=True")
 	if err != nil {
 		fmt.Printf("데이터베이스 연결 실패:%s\n", err)
 		os.Exit(1)
@@ -38,7 +34,8 @@ func SetDB(httpPort string) {
 		ID INTEGER PRIMARY KEY AUTO_INCREMENT,
 		Name TEXT,
 		Path TEXT,
-		UploadDate TIMESTAMP
+		Size INTEGER,
+		UploadDate DATETIME
 	)`)
 	if err != nil {
 		fmt.Printf("데이터베이스 테이블 생성 실패:%s\n", err)
@@ -58,7 +55,7 @@ func GetFiles() ([]File, error) {
 	var files []File
 	for rows.Next() {
 		var file File
-		err := rows.Scan(&file.ID, &file.Name, &file.Path, &file.UploadDate)
+		err := rows.Scan(&file.ID, &file.Name, &file.Path, &file.Size, &file.UploadDate)
 		if err != nil {
 			return nil, err
 		}
@@ -74,11 +71,11 @@ func GetFileByName(fileName string) (*File, error) {
 		return nil, fmt.Errorf("database connection is nil")
 	}
 
-	query := "SELECT ID, Name, Path, UploadDate FROM files WHERE NAME = ?"
+	query := "SELECT ID, Name, Path, Size, UploadDate FROM files WHERE NAME = ?"
 	row := DB.QueryRow(query, fileName)
 
 	var file File
-	err := row.Scan(&file.ID, &file.Name, &file.Path, &file.UploadDate)
+	err := row.Scan(&file.ID, &file.Name, &file.Size, &file.Path, &file.UploadDate)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
@@ -88,19 +85,31 @@ func GetFileByName(fileName string) (*File, error) {
 	return &file, nil
 }
 
-func SaveFileToDB(name string, path string) error {
+func SaveFileToDB(name string, path string) (File, error) {
 	if DB == nil {
-		return fmt.Errorf("database connection is nil")
+		return File{}, fmt.Errorf("database connection is nil")
 	}
 
+	stat, err := os.Stat(path)
+	if err != nil {
+		fmt.Printf("그만해그만~~~\n")
+		return File{}, err
+	}
+
+	size := int(stat.Size())
 	uploadDate := time.Now()
 
-	query := "INSERT INTO files (Name, Path, UploadDate) VALUES (?, ?, ?)"
-	_, err := DB.Exec(query, name, path, uploadDate)
+	query := "INSERT INTO files (Name, Path, Size, UploadDate) VALUES (?, ?, ?, ?)"
+	_, err = DB.Exec(query, name, path, size, uploadDate)
 	if err != nil {
-		return fmt.Errorf("error inserting file into database: %v", err)
+		return File{}, fmt.Errorf("error inserting file into database: %v", err)
 	}
 
 	fmt.Printf("File '%s' saved to the database.\n", name)
-	return nil
+	return File{
+		Name:       name,
+		Path:       path,
+		Size:       size,
+		UploadDate: uploadDate,
+	}, nil
 }

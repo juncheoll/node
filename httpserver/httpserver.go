@@ -10,7 +10,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var Port string
+var Port string = "8080"
 
 func Run() {
 

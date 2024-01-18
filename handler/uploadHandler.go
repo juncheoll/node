@@ -33,9 +33,7 @@ func SingleUploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	//_, port, _ := net.SplitHostPort(r.Host)
-
-	uploadDir := "./uploads/" + database.DbName + "/"
+	uploadDir := "./uploads/"
 	os.MkdirAll(uploadDir, os.ModePerm)
 	filePath := uploadDir + header.Filename
 	dst, err := os.Create(filePath)
@@ -47,7 +45,7 @@ func SingleUploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	io.Copy(dst, file)
 
-	err = database.SaveFileToDB(header.Filename, filePath)
+	_, err = database.SaveFileToDB(header.Filename, filePath)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -66,7 +64,7 @@ func EntireUploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	uploadDir := "./uploads/" + database.DbName + "/"
+	uploadDir := "./uploads/"
 	os.MkdirAll(uploadDir, os.ModePerm)
 	filePath := uploadDir + header.Filename
 	dst, err := os.Create(filePath)
@@ -78,7 +76,7 @@ func EntireUploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	io.Copy(dst, file)
 
-	err = database.SaveFileToDB(header.Filename, filePath)
+	fileInfo, err := database.SaveFileToDB(header.Filename, filePath)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -86,7 +84,7 @@ func EntireUploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 다른 노드들에게 파일 전송
 
-	tcpserver.SendFileToOtherNodes(file, filePath)
+	tcpserver.SendFileToOtherNodes(file, fileInfo)
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 

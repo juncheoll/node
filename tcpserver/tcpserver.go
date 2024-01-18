@@ -1,7 +1,6 @@
 package tcpserver
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,22 +9,20 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 
 	"node/database"
 	"node/websocket"
 )
 
-var Port string
+var Port string = ":9000"
 var Nodes map[string]net.Conn
 var Listener net.Listener
 
-func Run(httpPort string) {
-	fmt.Printf("TCP Port : %s\n", Port)
+func Run() {
 
 	Nodes = make(map[string]net.Conn)
 	var err error
-	Listener, err = net.Listen("tcp", ":"+Port)
+	Listener, err = net.Listen("tcp", Port)
 	if err != nil {
 		fmt.Printf("TCP Listen 실패 : %s\n", err)
 		os.Exit(1)
@@ -39,62 +36,55 @@ func Run(httpPort string) {
 				continue
 			}
 
+			//신규 노드 이름 받아오기
 			buffer := make([]byte, 512)
 			bytesRead, err := conn.Read(buffer)
 			if err != nil {
 				fmt.Printf("신규 노드 포트 수신 실패 : %s\n", err)
 				continue
 			}
-			newNodePort := string(buffer[:bytesRead])
+			newNodeName := string(buffer[:bytesRead])
 
-			fmt.Printf("노드(%s)와 연결\n", newNodePort)
-			Nodes[newNodePort] = conn
+			fmt.Printf("노드(%s)와 연결\n", newNodeName)
+			Nodes[newNodeName] = conn
 
-			go HandleNode(conn, newNodePort)
+			go HandleNode(newNodeName)
 		}
 	}()
 
-	JoinP2P(httpPort)
+	JoinP2P()
 }
 
-func HandleNode(conn net.Conn, remotePort string) {
+func HandleNode(remoteName string) {
 	defer func() {
-		conn.Close()
-		delete(Nodes, remotePort)
+		Nodes[remoteName].Close()
+		delete(Nodes, remoteName)
 	}()
 
+	conn := Nodes[remoteName]
+
 	for {
-		// 파일 이름 수신
+		// 파일 정보 수신
 		buffer := make([]byte, 1024)
 		bytesRead, err := conn.Read(buffer)
 		if err != nil {
-			fmt.Printf("노드(%s) 연결 끊김 : %s\n", remotePort, err)
+			fmt.Printf("노드(%s) 연결 끊김 : %s\n", remoteName, err)
 			return
 		}
-		fileName := string(buffer[:bytesRead])
-		fmt.Println("파일 이름 : ", fileName)
 
-		// 파일 크기 수신
-		//TODO::fileSize만이 아니라 이어지는 파일 내용도 같이 받고 있는듯?
-		//왜 안멈추고 계속 받지?
-		//Write로 넘겨주면 Read로 읽고 끝내야하는 것 아닌가?
-		buffer = make([]byte, 1024)
-		n, err := conn.Read(buffer)
-		fmt.Println("파일 크기의 크기 :", n)
+		var fileInfo database.File
+		err = json.Unmarshal(buffer[:bytesRead], &fileInfo)
 		if err != nil {
-			fmt.Printf("파일 크기 수신 실패:%s\n", err)
+			fmt.Println("파일 정보 역직렬화 실패:", err)
 			return
 		}
-		fileSize, err := strconv.ParseInt(string(bytes.Trim(buffer, "\x00\n")), 10, 64)
-		if err != nil {
-			fmt.Printf("파일 크기 파싱 실패:%s\n", err)
-			return
-		}
+
+		fmt.Println("파일 정보 : ", fileInfo)
 
 		// 파일 수신
-		uploadDir := "./uploads/" + database.DbName + "/"
+		uploadDir := "./uploads/"
 		os.MkdirAll(uploadDir, os.ModePerm)
-		filePath := uploadDir + fileName
+		filePath := uploadDir + fileInfo.Name
 
 		file, err := os.Create(filePath)
 		if err != nil {
@@ -119,12 +109,10 @@ func HandleNode(conn net.Conn, remotePort string) {
 				return
 			}
 
-			if fileSize == int64(total) {
+			if fileInfo.Size == total {
 				break
 			}
 		}
-
-		fmt.Printf("%d == %d\n", fileSize, total)
 
 		file.Close()
 		if err != nil {
@@ -132,13 +120,13 @@ func HandleNode(conn net.Conn, remotePort string) {
 			return
 		}
 
-		err = database.SaveFileToDB(fileName, filePath)
+		_, err = database.SaveFileToDB(fileInfo.Name, filePath)
 		if err != nil {
 			fmt.Printf("database saveing fail : %v\n", err)
 			return
 		}
 
-		fmt.Printf("File '%s' saved\n", fileName)
+		fmt.Printf("File '%s' saved\n", fileInfo.Name)
 
 		files, err := database.GetFiles()
 		if err != nil {
@@ -150,17 +138,16 @@ func HandleNode(conn net.Conn, remotePort string) {
 	}
 }
 
-func JoinP2P(httpPort string) {
-	//중앙에 nodeList 요청
+func JoinP2P() {
 	values := url.Values{}
-	values.Add("port", httpPort)
+	values.Add("dname", os.Getenv("HOSTNAME"))
 
-	url := "http://localhost:8080/?" + values.Encode()
+	url := "http://nodecenter:8080/?" + values.Encode()
 
 	response, err := http.Get(url)
 	if err != nil {
 		fmt.Printf("노드 리스트 받아오기 실패:%s\n", err)
-		os.Exit(1)
+		return
 	}
 	defer response.Body.Close()
 
@@ -172,62 +159,41 @@ func JoinP2P(httpPort string) {
 	}
 
 	//nodeList에 각각 dial
-	for _, nodePort := range nodeList {
-		nodeTCPPort, err := ConvertHTTPToTCPPort(nodePort)
+	for _, nodeName := range nodeList {
+		conn, err := net.Dial("tcp", nodeName+Port)
 		if err != nil {
-			fmt.Printf("HTTP TO TCP 포트변환 실패:%s\n", err)
-			continue
-		}
-		conn, err := net.Dial("tcp", ":"+nodeTCPPort)
-		if err != nil {
-			fmt.Printf("노드(%s)에 연결 실패:%s\n", nodePort, err)
+			fmt.Printf("노드(%s)에 연결 실패:%s\n", nodeName, err)
 			continue
 		}
 
-		fmt.Printf("노드(%s)와 연결\n", nodePort)
-		Nodes[nodePort] = conn
-		go HandleNode(conn, nodePort)
+		fmt.Printf("노드(%s)와 연결\n", nodeName)
+		Nodes[nodeName] = conn
+		go HandleNode(nodeName)
 
 		//연결된 노드에 본인 포트 전달
-		conn.Write([]byte(httpPort))
+		conn.Write([]byte(os.Getenv("HOSTNAME")))
 	}
 
 	fmt.Printf("P2P 네트워크 입장 성공\n")
 }
 
-func ConvertHTTPToTCPPort(HttpPort string) (string, error) {
-	port, err := strconv.Atoi(HttpPort)
-	if err != nil {
-		return "", err
-	}
-	port += 1000
-	TcpPort := strconv.Itoa(port)
-	return TcpPort, nil
-}
-
-func SendFileToOtherNodes(file multipart.File, filePath string) {
-	stat, err := os.Stat(filePath)
-	if err != nil {
-		fmt.Printf("Error getting file info: %v\n", err)
-		return
-	}
-	fileSize := strconv.FormatInt(stat.Size(), 10)
-	fileName := stat.Name()
-
+func SendFileToOtherNodes(file multipart.File, fileInfo database.File) {
 	for nodeName, conn := range Nodes {
 
-		fmt.Printf("%s 에게 %s전송\n", nodeName, fileName)
+		fmt.Printf("%s 에게 %s전송\n", nodeName, fileInfo.Name)
 
-		//파일 이름 전송
-		fmt.Println("파일 이름 전달 : ", fileName)
-		conn.Write([]byte(fileName))
+		//파일 정보 전송
+		fmt.Println("파일 정보 전달 : ", fileInfo)
 
-		//파일 사이즈 전송
-		fmt.Println("파일 사이즈 전달 : ", fileSize)
-		conn.Write([]byte(fileSize))
+		jsonData, err := json.Marshal(fileInfo)
+		if err != nil {
+			fmt.Println("파일 정보 직렬화 실패:", err)
+			return
+		}
+		conn.Write([]byte(jsonData))
 
 		//파일 내용 전송
-		_, err := file.Seek(0, 0)
+		_, err = file.Seek(0, 0)
 		if err != nil {
 			fmt.Println(err)
 			continue
