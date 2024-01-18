@@ -4,9 +4,17 @@ import (
 	"encoding/json"
 	"html/template"
 	"net/http"
+	"os"
 
 	"node/database"
+	"node/tcpserver"
 )
+
+type Message struct {
+	NodeName  string          `json:"nodename"`
+	NodeCount int             `json:"nodecnt"`
+	Files     []database.File `json:"files"`
+}
 
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
 
@@ -16,7 +24,13 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filesJSON, err := json.Marshal(files)
+	message := Message{
+		NodeName:  os.Getenv("HOSTNAME"),
+		NodeCount: len(tcpserver.Nodes),
+		Files:     files,
+	}
+
+	messageJSON, err := json.Marshal(message)
 	if err != nil {
 		http.Error(w, "Error encoding JSON: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -30,5 +44,5 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 파일 목록 전달
 	w.Header().Set("Content_Type", "application/json")
-	tmpl.Execute(w, string(filesJSON))
+	tmpl.Execute(w, string(messageJSON))
 }

@@ -14,11 +14,21 @@
         }
 
         // JSON 형식의 파일 리스트를 받아 HTML을 갱신하는 함수
-        function updateFileList(filesJSON) {
+        function updatePage(message) {
+            var nodeCount = document.getElementById("node-count");
+            var nodeCnt = parseInt(message.nodecnt, 10) + 1
+            nodeCount.textContent = "노드개수 : " + nodeCnt
+
+            var totalSize = 0
+            var totalFileSize = document.getElementById("total-file-size");
+            totalFileSize.textContent = "전체 파일 크기 : " + totalSize
+
             var fileList = document.getElementById("file-list");
             fileList.innerHTML = ""; // 기존 리스트 초기화
 
-            filesJSON.forEach(function(file) {
+            message.files.forEach(function(file) {
+                totalSize += file.size
+
                 var listItem = document.createElement("li");
 
                 var link = document.createElement("a");
@@ -28,21 +38,31 @@
                 var updateDate = document.createElement("span")
                 updateDate.textContent = "(" + file.uploaddate + ")"
 
+                var size = document.createElement("span")
+                size.textContent = "  파일크기 : " + file.size + "byte"
+
                 listItem.appendChild(link);
                 listItem.appendChild(updateDate);
+                listItem.appendChild(size)
 
                 fileList.appendChild(listItem);
             });
+
+            totalFileSize.textContent = "전체 파일 크기 : " + totalSize
         }
 
         // 페이지 로드 시 실행되는 함수
         async function onPageLoad() {
             // 서버에서 JSON 데이터 받아오기
-            const filesJSON = await fetchDataFromServer();
+            const message = await fetchDataFromServer();
 
             // JSON 데이터를 이용하여 HTML 갱신
-            if (filesJSON !== null) {
-                updateFileList(filesJSON);
+            if (message !== null) {
+                var nodeName = document.getElementById("node-name");
+                nodeName.textContent = message.nodename;
+
+                console.log(message)
+                updatePage(message);
             }
         }
 
@@ -51,27 +71,34 @@
     </script>
 </head>
 <body>
-    <h1>File List</h1>
+    <h1 id="node-name"></h1>
+    <h2>File List</h2>
     <ul id="file-list">
 
     </ul>
+    <br/><br/>
+
+    <span id="total-file-size"> </span>
 
     <form action="/upload/" method="post" enctype="multipart/form-data">
         <input type="file" name="file" />
         <br />
         <input type="submit" name="uploadType" value="single" />
-        <input type="submit" name="uploadType" value="entire" />
+        <input type="submit" name="uploadType" value="all" />
     </form>
+    <br /><br />
+
+    <span id="node-count"> </span>
 
     <script>
         const port = window.location.port; // 현재 페이지의 포트를 가져옵니다.
         const socket = new WebSocket(`ws://localhost:${port}/ws`);
 
         socket.onmessage = function(event){
-            var receivedData = JSON.parse(event.data);
-            console.log("받은 데이터", receivedData)
+            var message = JSON.parse(event.data);
+            console.log("받은 데이터", message)
 
-            updateFileList(receivedData)
+            updatePage(message)
         }
     </script>
 </body>

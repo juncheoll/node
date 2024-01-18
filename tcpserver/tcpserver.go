@@ -48,6 +48,13 @@ func Run() {
 			fmt.Printf("노드(%s)와 연결\n", newNodeName)
 			Nodes[newNodeName] = conn
 
+			files, err := database.GetFiles()
+			if err != nil {
+				fmt.Printf("에러에렁ㄹ\n")
+				continue
+			}
+			websocket.SendMessages(files, len(Nodes))
+
 			go HandleNode(newNodeName)
 		}
 	}()
@@ -59,6 +66,13 @@ func HandleNode(remoteName string) {
 	defer func() {
 		Nodes[remoteName].Close()
 		delete(Nodes, remoteName)
+		files, err := database.GetFiles()
+		if err != nil {
+			fmt.Printf("ㅎㄷ%s\n", err)
+			return
+		}
+		websocket.SendMessages(files, len(Nodes))
+
 	}()
 
 	conn := Nodes[remoteName]
@@ -134,7 +148,7 @@ func HandleNode(remoteName string) {
 			return
 		}
 		fmt.Println("웹소켓 샌드")
-		websocket.SendMessages(files)
+		websocket.SendMessages(files, len(Nodes))
 	}
 }
 
@@ -160,6 +174,10 @@ func JoinP2P() {
 
 	//nodeList에 각각 dial
 	for _, nodeName := range nodeList {
+		if nodeName == os.Getenv("HOSTNAME") {
+			continue
+		}
+
 		conn, err := net.Dial("tcp", nodeName+Port)
 		if err != nil {
 			fmt.Printf("노드(%s)에 연결 실패:%s\n", nodeName, err)
@@ -178,6 +196,12 @@ func JoinP2P() {
 }
 
 func SendFileToOtherNodes(file multipart.File, fileInfo database.File) {
+	jsonData, err := json.Marshal(fileInfo)
+	if err != nil {
+		fmt.Println("파일 정보 직렬화 실패:", err)
+		return
+	}
+
 	for nodeName, conn := range Nodes {
 
 		fmt.Printf("%s 에게 %s전송\n", nodeName, fileInfo.Name)
@@ -185,11 +209,6 @@ func SendFileToOtherNodes(file multipart.File, fileInfo database.File) {
 		//파일 정보 전송
 		fmt.Println("파일 정보 전달 : ", fileInfo)
 
-		jsonData, err := json.Marshal(fileInfo)
-		if err != nil {
-			fmt.Println("파일 정보 직렬화 실패:", err)
-			return
-		}
 		conn.Write([]byte(jsonData))
 
 		//파일 내용 전송

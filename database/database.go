@@ -75,7 +75,7 @@ func GetFileByName(fileName string) (*File, error) {
 	row := DB.QueryRow(query, fileName)
 
 	var file File
-	err := row.Scan(&file.ID, &file.Name, &file.Size, &file.Path, &file.UploadDate)
+	err := row.Scan(&file.ID, &file.Name, &file.Path, &file.Size, &file.UploadDate)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {

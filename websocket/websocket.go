@@ -16,6 +16,11 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+type Message struct {
+	NodeCount int             `json:"nodecnt"`
+	Files     []database.File `json:"files"`
+}
+
 // 접속한 웹소켓 클라이언트, clients에 저장
 func WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrader.Upgrade(w, r, nil)
@@ -41,10 +46,14 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 
 // tcpserver가 파일 업로드를 수행한 후, 호출
 // websocket 클라이언트 들에게 파일리스트를 전달하는
-func SendMessages(files []database.File) {
+func SendMessages(files []database.File, nodeCnt int) {
+	message := Message{
+		NodeCount: nodeCnt,
+		Files:     files,
+	}
 
 	for client := range clients {
-		err := client.WriteJSON(files)
+		err := client.WriteJSON(message)
 		if err != nil {
 			fmt.Println(err)
 			client.Close()

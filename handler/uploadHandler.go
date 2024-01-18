@@ -14,16 +14,16 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 	uploadType := r.FormValue("uploadType")
 
 	if uploadType == "single" {
-		SingleUploadHandler(w, r)
-	} else if uploadType == "entire" {
-		EntireUploadHandler(w, r)
+		UploadToSingleNodeHandler(w, r)
+	} else if uploadType == "all" {
+		UploadToAllNodeHandler(w, r)
 	} else {
 		http.Error(w, "Invalid upload type", http.StatusBadRequest)
 		return
 	}
 }
 
-func SingleUploadHandler(w http.ResponseWriter, r *http.Request) {
+func UploadToSingleNodeHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("singleupload 호출")
 
 	file, header, err := r.FormFile("file")
@@ -54,8 +54,8 @@ func SingleUploadHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func EntireUploadHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("entireupload 호출")
+func UploadToAllNodeHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("allupload 호출")
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
