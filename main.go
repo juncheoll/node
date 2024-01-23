@@ -8,13 +8,10 @@ import (
 	"node/tcpserver"
 )
 
-var Name string
-
 func main() {
 	defer func() {
 		fmt.Printf("종료")
 		database.DB.Close()
-		tcpserver.Listener.Close()
 	}()
 
 	database.SetDB()

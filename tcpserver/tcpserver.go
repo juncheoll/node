@@ -15,7 +15,6 @@ import (
 
 var Port string = ":9000"
 var Nodes map[string]net.Conn = make(map[string]net.Conn)
-var Listener net.Listener
 
 type Message struct {
 	Command  string
@@ -23,47 +22,43 @@ type Message struct {
 }
 
 func Run() {
-	var err error
-	Listener, err = net.Listen("tcp", Port)
+	ln, err := net.Listen("tcp", Port)
 	if err != nil {
 		fmt.Printf("TCP Listen 실패 : %s\n", err)
 		os.Exit(1)
 	}
 
-	go HandleListen()
+	go HandleListen(ln)
 	JoinP2P()
 }
 
-func HandleListen() {
+func HandleListen(ln net.Listener) {
+	defer ln.Close()
+
 	for {
-		conn, err := Listener.Accept()
+		conn, err := ln.Accept()
 		if err != nil {
 			fmt.Printf("신규 노드 연결 승인 실패 : %s\n", err)
 			continue
 		}
 
 		//신규 노드에게 Message 받기
-		buffer := make([]byte, 1024)
-		bytesRead, err := conn.Read(buffer)
+		recvMs, err := getMessage(conn)
 		if err != nil {
-			fmt.Printf("신규 노드 Message 수신 실패 : %s\n", err)
+			fmt.Printf("신규 노드 수신 실패 : %s\n", err)
 			continue
 		}
-		var message Message
-		err = json.Unmarshal(buffer[:bytesRead], &message)
-		if err != nil {
-			fmt.Printf("신규 노드 Message 역직렬화 실패 %s\n", err)
-			continue
-		}
+
+		remoteName := recvMs.NodeName
 
 		//"join"이면 다른 노드들에게 전달
-		if message.Command == "join" {
-			ms := Message{
+		if recvMs.Command == "join" {
+			sendMs := Message{
 				Command:  "dial",
-				NodeName: message.NodeName,
+				NodeName: remoteName,
 			}
 
-			msJSON, err := json.Marshal(ms)
+			msJSON, err := json.Marshal(sendMs)
 			if err != nil {
 				fmt.Printf("msJSON 역직렬화 실패 : %s\n", err)
 				continue
@@ -79,10 +74,10 @@ func HandleListen() {
 			}
 		}
 
-		fmt.Printf("노드(%s)와 연결\n", message.NodeName)
-		Nodes[message.NodeName] = conn
+		fmt.Printf("노드(%s)와 연결\n", remoteName)
+		Nodes[remoteName] = conn
 
-		go HandleNode(message.NodeName)
+		go handleNode(remoteName)
 
 		files, err := database.GetFiles()
 		if err != nil {
@@ -93,10 +88,39 @@ func HandleListen() {
 	}
 }
 
-func HandleNode(remoteName string) {
+func sendMessage(conn net.Conn, sendMs Message) error {
+	msJSON, err := json.Marshal(sendMs)
+	if err != nil {
+		return err
+	}
+
+	_, err = conn.Write(msJSON)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func getMessage(conn net.Conn) (Message, error) {
+	buffer := make([]byte, 1024)
+	bytesRead, err := conn.Read(buffer)
+	if err != nil {
+		return Message{}, err
+	}
+	var message Message
+	err = json.Unmarshal(buffer[:bytesRead], &message)
+	if err != nil {
+		return Message{}, err
+	}
+	return message, nil
+}
+
+func handleNode(remoteName string) {
 	defer func() {
 		Nodes[remoteName].Close()
 		delete(Nodes, remoteName)
+		fmt.Printf("노드(%s) 연결 끊김\n", remoteName)
 		files, err := database.GetFiles()
 		if err != nil {
 			fmt.Printf("ㅎㄷ%s\n", err)
@@ -109,47 +133,32 @@ func HandleNode(remoteName string) {
 	conn := Nodes[remoteName]
 
 	for {
-		buffer := make([]byte, 1024)
-		bytesRead, err := conn.Read(buffer)
+		recvMs, err := getMessage(conn)
 		if err != nil {
-			fmt.Printf("노드(%s) 연결 끊김 : %s\n", remoteName, err)
-			return
+			break
 		}
 
-		var message Message
-		err = json.Unmarshal(buffer[:bytesRead], &message)
-		if err != nil {
-			fmt.Printf("노드(%s) Message 역직렬화 실패 %s\n", remoteName, err)
-			return
-		}
-
-		if message.Command == "dial" {
-			newConn, err := net.Dial("tcp", message.NodeName+Port)
+		if recvMs.Command == "dial" {
+			newConn, err := net.Dial("tcp", recvMs.NodeName+Port)
 			if err != nil {
 				fmt.Printf("연결 실패:%s\n", err)
 				continue
 			}
 
-			ms := Message{
+			sendMs := Message{
 				Command:  "accept",
 				NodeName: os.Getenv("HOSTNAME"),
 			}
 
-			msJSON, err := json.Marshal(ms)
+			err = sendMessage(newConn, sendMs)
 			if err != nil {
-				fmt.Printf("ms 직렬화 실패 :%s\n", err)
-				continue
+				fmt.Printf("노드(%s)에 전송 실패 : %s\n", recvMs.NodeName, err)
+				return
 			}
 
-			_, err = newConn.Write(msJSON)
-			if err != nil {
-				fmt.Printf("msJSON 전송 실패 :%s\n", err)
-				continue
-			}
-
-			fmt.Printf("노드(%s)와 연결\n", message.NodeName)
-			Nodes[message.NodeName] = newConn
-			go HandleNode(message.NodeName)
+			fmt.Printf("노드(%s)와 연결\n", recvMs.NodeName)
+			Nodes[recvMs.NodeName] = newConn
+			go handleNode(recvMs.NodeName)
 
 			files, err := database.GetFiles()
 			if err != nil {
@@ -159,7 +168,7 @@ func HandleNode(remoteName string) {
 			fmt.Println("웹소켓 샌드")
 			websocket.SendMessages(files, len(Nodes))
 
-		} else if message.Command == "upload" {
+		} else if recvMs.Command == "upload" {
 			// 파일 정보 수신
 			buffer := make([]byte, 1024)
 			bytesRead, err := conn.Read(buffer)
@@ -174,8 +183,6 @@ func HandleNode(remoteName string) {
 				fmt.Println("파일 정보 역직렬화 실패:", err)
 				return
 			}
-
-			fmt.Println("파일 정보 : ", fileInfo)
 
 			// 파일 수신
 			uploadDir := "./uploads/"
@@ -267,7 +274,7 @@ func JoinP2P() {
 
 	fmt.Printf("노드(%s)와 연결\n", targetNodeAddr)
 	Nodes[targetNodeAddr] = conn
-	go HandleNode(targetNodeAddr)
+	go handleNode(targetNodeAddr)
 }
 
 func SendFileToOtherNodes(file multipart.File, fileInfo database.File) {
