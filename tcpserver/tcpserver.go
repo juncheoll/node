@@ -15,6 +15,7 @@ import (
 
 var Port string = ":9000"
 var Nodes map[string]net.Conn = make(map[string]net.Conn)
+var broadcast chan Message = make(chan Message)
 
 type Message struct {
 	Command  string
@@ -53,24 +54,17 @@ func HandleListen(ln net.Listener) {
 
 		//"join"이면 다른 노드들에게 전달
 		if recvMs.Command == "join" {
+			fmt.Printf("노드(%s)로부터 네트워크 참가 요청\n", remoteName)
 			sendMs := Message{
 				Command:  "dial",
 				NodeName: remoteName,
 			}
 
-			msJSON, err := json.Marshal(sendMs)
-			if err != nil {
-				fmt.Printf("msJSON 역직렬화 실패 : %s\n", err)
-				continue
-			}
-
-			for _, conn := range Nodes {
-
-				_, err = conn.Write(msJSON)
-				if err != nil {
-					fmt.Printf("msJSON 전송 실패 : %s\n", err)
-					continue
-				}
+			select {
+			case broadcast <- sendMs:
+				fmt.Println("broadcasting:", broadcast)
+			default:
+				fmt.Println("Channel is full or no receiver ready, skipping value:", sendMs)
 			}
 		}
 
@@ -131,6 +125,24 @@ func handleNode(remoteName string) {
 	}()
 
 	conn := Nodes[remoteName]
+
+	go func(conn net.Conn) {
+		for {
+			sendMs := <-broadcast
+
+			msJSON, err := json.Marshal(sendMs)
+			if err != nil {
+				fmt.Printf("msJSON 역직렬화 실패 : %s\n", err)
+				continue
+			}
+
+			_, err = conn.Write(msJSON)
+			if err != nil {
+				fmt.Printf("msJSON 전송 실패 : %s\n", err)
+				continue
+			}
+		}
+	}(conn)
 
 	for {
 		recvMs, err := getMessage(conn)
